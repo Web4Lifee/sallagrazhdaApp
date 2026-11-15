@@ -1,4 +1,4 @@
-# babiApp – Mirëmbajtja e Oborrit
+# sallagrazhdaApp – Mirëmbajtja e Oborrit
 
 Expo (SDK 58) app for tracking the yearly yard-maintenance fee (35 € per person) and extra donations. UI is in Albanian.
 

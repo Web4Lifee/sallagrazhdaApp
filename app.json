@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "babiApp",
-    "slug": "babiApp",
+    "name": "sallagrazhdaApp",
+    "slug": "sallagrazhdaApp",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "babiapp",
+    "scheme": "sallagrazhdaapp",
     "userInterfaceStyle": "light",
     "ios": {
       "icon": "./assets/expo.icon"
