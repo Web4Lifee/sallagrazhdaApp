@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
@@ -54,8 +55,23 @@ export function normalizeServerUrl(input: string): string | null {
   try {
     const url = new URL(value);
     if (url.protocol !== 'https:' && !(__DEV__ && url.protocol === 'http:')) return null;
+    if (isLocalhost(url.hostname) && devMachineHost()) url.hostname = devMachineHost()!;
     return `${url.protocol}//${url.host}`;
   } catch {
     return null;
   }
+}
+
+export const isLocalhost = (hostname: string) => hostname === 'localhost' || hostname === '127.0.0.1';
+
+/**
+ * On a phone, "localhost" is the phone itself. During development (Expo Go / dev build) the app
+ * knows the computer it was loaded from (the Metro server, e.g. "192.168.1.20:8081"), so a
+ * localhost server address is pointed at that computer instead. Never applies to release builds or web.
+ */
+export function devMachineHost(): string | null {
+  if (!__DEV__ || Platform.OS === 'web') return null;
+  const hostUri = Constants.expoConfig?.hostUri;
+  const host = hostUri?.split(':')[0];
+  return host && !isLocalhost(host) ? host : null;
 }

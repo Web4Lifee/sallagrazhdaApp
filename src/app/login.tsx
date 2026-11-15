@@ -47,7 +47,11 @@ export default function LoginScreen() {
         setPassword('');
       } else if (e instanceof ApiError && e.code === 'NOT_OUR_SERVER') {
         setEditServer(true);
-        setError('Serveri nuk u gjet në këtë adresë. Kontrolloni adresën dhe internetin.');
+        setError(
+          __DEV__ && Platform.OS !== 'web'
+            ? `Serveri nuk u gjet në ${serverUrl.replace(/^https?:\/\//, '')}. Telefoni dhe kompjuteri duhet të jenë në të njëjtin Wi-Fi, dhe serveri i nisur me: API_BIND=0.0.0.0 docker compose up -d`
+            : 'Serveri nuk u gjet në këtë adresë. Kontrolloni adresën dhe internetin.',
+        );
       } else {
         reportError(e);
       }
