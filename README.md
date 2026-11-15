@@ -18,7 +18,7 @@ npx expo start
 
 `npx expo start --web` runs it in the browser (the local backend already allows `http://localhost:8081`).
 
-**On a phone with Expo Go:** `localhost` means the phone itself, so start the backend with `API_BIND=0.0.0.0 docker compose up -d` and set `EXPO_PUBLIC_API_URL=http://<your computer's IP>:3000` in `.env.local` (or type that address on the login screen under *Ndrysho*). Phone and computer must be on the same Wi-Fi.
+**On a phone with Expo Go:** `localhost` means the phone itself. In development the app automatically uses the computer Expo runs on instead, but the backend must accept connections from the network: add `API_BIND=0.0.0.0` to the backend's `.env` and run `docker compose up -d` there (on Windows PowerShell, or for a single start: `$env:API_BIND = "0.0.0.0"; docker compose up -d`). Phone and computer must be on the same Wi-Fi. You can also type `http://<computer IP>:3000` on the login screen under *Ndrysho*.
 
 **Release builds** only accept an `https://` server. Set `EXPO_PUBLIC_API_URL=https://api.your-domain` in `.env.production` or as an EAS environment variable before `eas build`.
 

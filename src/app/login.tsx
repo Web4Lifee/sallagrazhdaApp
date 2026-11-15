@@ -49,7 +49,7 @@ export default function LoginScreen() {
         setEditServer(true);
         setError(
           __DEV__ && Platform.OS !== 'web'
-            ? `Serveri nuk u gjet në ${serverUrl.replace(/^https?:\/\//, '')}. Telefoni dhe kompjuteri duhet të jenë në të njëjtin Wi-Fi, dhe serveri i nisur me: API_BIND=0.0.0.0 docker compose up -d`
+            ? `Serveri nuk u gjet në ${serverUrl.replace(/^https?:\/\//, '')}. Telefoni dhe kompjuteri duhet të jenë në të njëjtin Wi-Fi, dhe serveri i hapur për rrjetin: API_BIND=0.0.0.0 në skedarin .env të serverit, pastaj docker compose up -d`
             : 'Serveri nuk u gjet në këtë adresë. Kontrolloni adresën dhe internetin.',
         );
       } else {
