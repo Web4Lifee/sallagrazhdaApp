@@ -1,56 +1,43 @@
-# Welcome to your Expo app 👋
+# babiApp – Mirëmbajtja e Oborrit
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Expo (SDK 58) app for tracking the yearly yard-maintenance fee (35 € per person) and extra donations. UI is in Albanian.
 
-## Get started
-
-1. Install dependencies
-
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **src/app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## Run
 
 ```bash
-npm run reset-project
+npm install
+npx expo start
 ```
 
-This command will move the starter code to the **example** directory and create a blank **src/app** directory where you can start developing.
+Scan the QR code with **Expo Go** on your phone. `npx expo start --web` runs it in the browser.
 
-### Other setup steps
+## How it works
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+- **Ballina (Home)** – collected amount vs. the season goal (default 2.500 €), people paid, unpaid tickets, donations, last 3 payments, and the "Pagesë e re" button. Arrows switch between seasons.
+- **Pagesat** – debounced search by name / father's name / surname (accent-insensitive: `celaj` finds `Çelaj`), filters by paid/unpaid, register new people. Tap a person for their card with all tickets sorted by date; tap a ticket for details, mark paid/unpaid, print, delete.
+- **Cilësimet (Settings)** – your name, receipt title, goal, yearly fee, season start month + year, payment reasons, printer paper width (58/80 mm).
 
-## Learn more
+### Seasons and yearly tickets
 
-To learn more about developing your project with Expo, look at the following resources:
+Starting a season creates one unpaid yearly ticket for every registered person. A season starts in one of two ways:
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+- **Automatically** on the 1st of the chosen month (default **1 Tetor 2027**). The app checks when it opens and when it comes back to the foreground.
+- **Manually** with **Cilësimet → Fillo sezonin … tani**, which starts it immediately.
 
-## Join the community
+After the first season, the next season's year is filled in automatically (2027/28 → 2028/29). Only its start month can be changed, e.g. one month later, and months that have already begun are disabled. People registered mid-season get the current season's ticket immediately. A deleted yearly ticket is remembered and not recreated.
 
-Join our community of developers creating universal apps.
+### Printing
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+Receipts print through the phone's print system (`expo-print`): AirPrint on iOS, Android print services on Android. For a Bluetooth thermal printer on Android, install the printer's print-service app (e.g. RawBT) and pick it in the print dialog. Use **Cilësimet → Printo një fletëpagesë prove** to test.
+
+### Data
+
+Everything is stored locally on the device (AsyncStorage). Each phone has its own data.
+
+## Code map
+
+- `src/app/` – screens (Expo Router): `(tabs)/index|payments|settings`, `person/[id]`, `person/new`, `ticket/[id]`, `payment/new`
+- `src/store/useStore.ts` – persisted zustand store and yearly ticket generation
+- `src/store/selectors.ts` – stats and derived data
+- `src/lib/` – formatting, seasons, search, receipt HTML
+- `src/components/` – UI kit, tab bar, rows, forms
