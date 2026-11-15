@@ -11,6 +11,7 @@ import { formatDateTime, formatMoney, formalName, parseAmount, receiptNumber } f
 import { goBack } from '@/lib/nav';
 import { confirm, haptic, notify } from '@/lib/platform';
 import { printReceipt } from '@/lib/receipt';
+import { reportError, useBusy } from '@/lib/useBusy';
 import { useSeasonInfo } from '@/store/seasons';
 import { useStore } from '@/store/useStore';
 
@@ -28,6 +29,7 @@ export default function TicketScreen() {
   const [amountText, setAmountText] = useState(() => (ticket ? String(ticket.amount).replace('.', ',') : ''));
   const [printing, setPrinting] = useState(false);
   const [justPaid, setJustPaid] = useState(false);
+  const [busy, run] = useBusy();
 
   if (!ticket || !person) {
     return (
@@ -54,12 +56,13 @@ export default function TicketScreen() {
     }
   };
 
-  const onMarkPaid = () => {
-    if (!amountValid) return;
-    markPaid(ticket.id, amount);
-    haptic.success();
-    setJustPaid(true);
-  };
+  const onMarkPaid = () =>
+    run(async () => {
+      if (!amountValid) return;
+      await markPaid(ticket.id, amount);
+      haptic.success();
+      setJustPaid(true);
+    });
 
   const onMarkUnpaid = async () => {
     const ok = await confirm({
@@ -68,9 +71,11 @@ export default function TicketScreen() {
       confirmText: 'Po, ktheje',
     });
     if (!ok) return;
-    markUnpaid(ticket.id);
-    setAmountText(String(ticket.due ?? ticket.amount).replace('.', ','));
-    setJustPaid(false);
+    await run(async () => {
+      await markUnpaid(ticket.id);
+      setAmountText(String(ticket.due ?? ticket.amount).replace('.', ','));
+      setJustPaid(false);
+    });
   };
 
   const onDelete = async () => {
@@ -81,9 +86,13 @@ export default function TicketScreen() {
       destructive: true,
     });
     if (!ok) return;
-    haptic.warning();
-    goBack();
-    deleteTicket(ticket.id);
+    try {
+      await deleteTicket(ticket.id);
+      haptic.warning();
+      goBack();
+    } catch (e) {
+      reportError(e);
+    }
   };
 
   const banner = created === '1' ? 'Pagesa u ruajt me sukses' : justPaid ? 'Fletëpagesa u shënua si e paguar' : null;
@@ -170,7 +179,7 @@ export default function TicketScreen() {
           <View style={{ gap: space.sm }}>
             <Button label="Printo fletëpagesën" icon="print" size="lg" loading={printing} onPress={onPrint} />
             {ticket.kind === 'annual' ? (
-              <Button label="Kthe në pa paguar" icon="undo" variant="ghost" onPress={onMarkUnpaid} />
+              <Button label="Kthe në pa paguar" icon="undo" variant="ghost" disabled={busy} onPress={onMarkUnpaid} />
             ) : null}
           </View>
         ) : (
@@ -196,7 +205,7 @@ export default function TicketScreen() {
                 Tarifa {formatMoney(ticket.due)} + {formatMoney(amount - ticket.due)} shtesë
               </AppText>
             ) : null}
-            <Button label="Shëno si të paguar" icon="checkCircle" size="lg" disabled={!amountValid} onPress={onMarkPaid} />
+            <Button label="Shëno si të paguar" icon="checkCircle" size="lg" loading={busy} disabled={!amountValid} onPress={onMarkPaid} />
             <Button label="Printo si të papaguar" icon="print" variant="secondary" loading={printing} onPress={onPrint} />
           </View>
         )}

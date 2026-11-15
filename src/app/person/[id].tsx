@@ -10,6 +10,7 @@ import { colors, font, radius, space } from '@/constants/theme';
 import { formatDate, formatMoney, fullName } from '@/lib/format';
 import { goBack } from '@/lib/nav';
 import { confirm, haptic } from '@/lib/platform';
+import { reportError } from '@/lib/useBusy';
 import { useSeasonInfo } from '@/store/seasons';
 import { seasonStatusMap, sortTicketsByDate } from '@/store/selectors';
 import { useStore } from '@/store/useStore';
@@ -58,9 +59,13 @@ export default function PersonScreen() {
       destructive: true,
     });
     if (!ok) return;
-    haptic.warning();
-    goBack();
-    deletePerson(person.id);
+    try {
+      await deletePerson(person.id);
+      haptic.warning();
+      goBack();
+    } catch (e) {
+      reportError(e);
+    }
   };
 
   return (

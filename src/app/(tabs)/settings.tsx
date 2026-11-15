@@ -5,12 +5,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, type IconName } from '@/components/Icon';
 import { AppText, Button, Card, Chip, IconButton } from '@/components/ui';
 import { colors, font, radius, space, TAB_BAR_SPACE } from '@/constants/theme';
-import { formatDate, formatMoney, MONTHS, parseAmount } from '@/lib/format';
-import { haptic, notify } from '@/lib/platform';
+import { formatDate, formatDateTime, formatMoney, MONTHS, parseAmount } from '@/lib/format';
+import { confirm, haptic, notify } from '@/lib/platform';
 import { printReceipt } from '@/lib/receipt';
 import { seasonStart, seasonStartLabel } from '@/lib/season';
-import type { PaperWidth } from '@/lib/types';
+import type { PaperWidth, Settings } from '@/lib/types';
+import { reportError, useBusy } from '@/lib/useBusy';
 import { useSeasonInfo, useStartSeason } from '@/store/seasons';
+import { useSession } from '@/store/session';
 import { useStore } from '@/store/useStore';
 
 /** A month whose 1st day has already arrived can't be scheduled; use "start now" instead. */
@@ -24,6 +26,15 @@ export default function SettingsScreen() {
   const updateSettings = useStore((s) => s.updateSettings);
   const addReason = useStore((s) => s.addReason);
   const removeReason = useStore((s) => s.removeReason);
+  const syncedAt = useStore((s) => s.syncedAt);
+  const sync = useStore((s) => s.sync);
+  const user = useSession((s) => s.user);
+  const serverUrl = useSession((s) => s.serverUrl);
+  const signOut = useSession((s) => s.signOut);
+  const [syncBusy, runSync] = useBusy();
+
+  // Shown immediately; rolled back with an alert if the server refuses it.
+  const save = (patch: Partial<Settings>) => updateSettings(patch).catch(reportError);
 
   const [newReason, setNewReason] = useState('');
   const [printing, setPrinting] = useState(false);
@@ -32,13 +43,27 @@ export default function SettingsScreen() {
   const current = info.current;
   const startSeason = useStartSeason();
 
-  const submitReason = () => {
-    if (addReason(newReason)) {
-      haptic.success();
-      setNewReason('');
-    } else if (newReason.trim()) {
-      notify('Kjo arsye ekziston tashmë');
+  const submitReason = async () => {
+    try {
+      if (await addReason(newReason)) {
+        haptic.success();
+        setNewReason('');
+      } else if (newReason.trim()) {
+        notify('Kjo arsye ekziston tashmë');
+      }
+    } catch (e) {
+      reportError(e);
     }
+  };
+
+  const onSignOut = async () => {
+    const ok = await confirm({
+      title: 'Të dilni nga llogaria?',
+      message: 'Të dhënat mbeten të ruajtura në server. Për t’i parë përsëri duhet të hyni me fjalëkalim.',
+      confirmText: 'Dil',
+      destructive: true,
+    });
+    if (ok) await signOut();
   };
 
   const testPrint = async () => {
@@ -84,12 +109,12 @@ export default function SettingsScreen() {
 
         {/* Profile */}
         <Section icon="person" title="Profili">
-          <TextSetting label="Emri juaj" value={settings.adminName} onCommit={(v) => updateSettings({ adminName: v })} />
+          <TextSetting label="Emri juaj" value={settings.adminName} onCommit={(v) => save({ adminName: v })} />
           <Separator />
           <TextSetting
             label="Titulli në fletëpagesë"
             value={settings.organization}
-            onCommit={(v) => updateSettings({ organization: v })}
+            onCommit={(v) => save({ organization: v })}
           />
         </Section>
 
@@ -99,14 +124,14 @@ export default function SettingsScreen() {
             label="Kostoja e mirëmbajtjes"
             hint="Shuma që i paguhet mirëmbajtësit të oborrit për sezon"
             value={settings.goal}
-            onCommit={(v) => updateSettings({ goal: v })}
+            onCommit={(v) => save({ goal: v })}
           />
           <Separator />
           <NumberSetting
             label="Tarifa vjetore për person"
             hint="Vlen për fletëpagesat e reja"
             value={settings.annualFee}
-            onCommit={(v) => updateSettings({ annualFee: v })}
+            onCommit={(v) => save({ annualFee: v })}
           />
         </Section>
 
@@ -140,7 +165,7 @@ export default function SettingsScreen() {
                   label={m}
                   selected={i === month}
                   disabled={isPast(info.nextYear, i)}
-                  onPress={() => updateSettings({ seasonStartMonth: i })}
+                  onPress={() => save({ seasonStartMonth: i })}
                 />
               ))}
             </View>
@@ -160,7 +185,7 @@ export default function SettingsScreen() {
                   size={36}
                   background={colors.surfaceMuted}
                   disabled={isPast(settings.seasonStartYear - 1, month)}
-                  onPress={() => updateSettings({ seasonStartYear: settings.seasonStartYear - 1 })}
+                  onPress={() => save({ seasonStartYear: settings.seasonStartYear - 1 })}
                 />
                 <Text style={styles.stepperValue}>{settings.seasonStartYear}</Text>
                 <IconButton
@@ -168,7 +193,7 @@ export default function SettingsScreen() {
                   label="Viti tjetër"
                   size={36}
                   background={colors.surfaceMuted}
-                  onPress={() => updateSettings({ seasonStartYear: settings.seasonStartYear + 1 })}
+                  onPress={() => save({ seasonStartYear: settings.seasonStartYear + 1 })}
                 />
               </View>
             )}
@@ -189,7 +214,7 @@ export default function SettingsScreen() {
           <AppText variant="caption">Zgjidhen kur krijoni një pagesë të re. Një pagesë mund të ketë disa arsye.</AppText>
           <View style={styles.reasons}>
             {settings.reasons.map((r) => (
-              <Chip key={r} label={r} onRemove={() => removeReason(r)} />
+              <Chip key={r} label={r} onRemove={() => removeReason(r).catch(reportError)} />
             ))}
             {settings.reasons.length === 0 ? <AppText variant="caption">Nuk ka arsye. Shtoni një më poshtë.</AppText> : null}
           </View>
@@ -220,7 +245,7 @@ export default function SettingsScreen() {
                   accessibilityState={{ selected }}
                   onPress={() => {
                     haptic.tap();
-                    updateSettings({ paperWidth: w });
+                    save({ paperWidth: w });
                   }}
                   style={[styles.segmentItem, selected && styles.segmentItemActive]}>
                   <Text style={[styles.segmentText, selected && styles.segmentTextActive]}>{w} mm</Text>
@@ -235,12 +260,44 @@ export default function SettingsScreen() {
           </AppText>
         </Section>
 
+        {/* Account */}
+        <Section icon="lock" title="Llogaria">
+          <View style={styles.settingRow}>
+            <View style={styles.seasonIcon}>
+              <Icon name="person" size={22} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <AppText variant="bodyStrong">{user?.displayName || user?.username || 'Administratori'}</AppText>
+              <AppText variant="caption" numberOfLines={1}>
+                {serverUrl.replace(/^https?:\/\//, '')}
+              </AppText>
+            </View>
+          </View>
+          <Separator />
+          <View style={styles.settingRow}>
+            <View style={{ flex: 1 }}>
+              <AppText variant="bodyStrong">Sinkronizimi</AppText>
+              <AppText variant="caption">
+                {syncedAt ? `Përditësuar më ${formatDateTime(syncedAt)}` : 'Ende pa u sinkronizuar'}
+              </AppText>
+            </View>
+            <Button
+              label="Rifresko"
+              icon="sync"
+              variant="secondary"
+              loading={syncBusy}
+              onPress={() => runSync(() => sync({ force: true }))}
+            />
+          </View>
+          <Button label="Dil nga llogaria" icon="logout" variant="dangerSoft" onPress={onSignOut} />
+        </Section>
+
         <View style={styles.footer}>
           <AppText variant="caption" style={{ textAlign: 'center' }}>
             {peopleCount} persona · {ticketCount} fletëpagesa
           </AppText>
           <AppText variant="caption" style={{ textAlign: 'center', fontSize: 12 }}>
-            Të dhënat ruhen në këtë pajisje.
+            Të dhënat ruhen në server dhe një kopje në këtë pajisje.
           </AppText>
         </View>
       </ScrollView>

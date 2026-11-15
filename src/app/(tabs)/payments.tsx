@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { FlatList, Keyboard, ScrollView, StyleSheet, View } from 'react-native';
+import { FlatList, Keyboard, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PersonRow } from '@/components/Rows';
@@ -11,6 +11,7 @@ import { useSeasonInfo } from '@/store/seasons';
 import { comparePeople, searchPeople } from '@/lib/search';
 import { useDebounced } from '@/lib/useDebounced';
 import { seasonStatusMap } from '@/store/selectors';
+import { useRefresh } from '@/store/useRefresh';
 import { useStore } from '@/store/useStore';
 
 type Filter = 'all' | 'unpaid' | 'paid';
@@ -21,6 +22,7 @@ export default function PaymentsScreen() {
   const tickets = useStore((s) => s.tickets);
   const info = useSeasonInfo();
   const season = info.active;
+  const { refreshing, onRefresh } = useRefresh();
 
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
@@ -99,6 +101,9 @@ export default function PaymentsScreen() {
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         onScrollBeginDrag={Keyboard.dismiss}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} colors={[colors.primary]} />
+        }
         contentContainerStyle={[styles.list, { paddingBottom: TAB_BAR_SPACE + insets.bottom }]}
         renderItem={({ item }) => (
           <PersonRow person={item} onPress={() => router.push(`/person/${item.id}`)} />

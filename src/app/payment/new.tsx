@@ -15,6 +15,7 @@ import { haptic } from '@/lib/platform';
 import { useSeasonInfo } from '@/store/seasons';
 import { comparePeople, searchPeople } from '@/lib/search';
 import type { Ticket } from '@/lib/types';
+import { useBusy } from '@/lib/useBusy';
 import { useDebounced } from '@/lib/useDebounced';
 import { useStore } from '@/store/useStore';
 
@@ -43,6 +44,7 @@ export default function NewPaymentScreen() {
   const [amountText, setAmountText] = useState<string | null>(null);
   const [reasons, setReasons] = useState<string[] | null>(null);
   const [note, setNote] = useState('');
+  const [busy, run] = useBusy();
 
   const debounced = useDebounced(query, 300);
   const pending = query.trim() !== debounced.trim();
@@ -112,19 +114,20 @@ export default function NewPaymentScreen() {
   const toggleReason = (r: string) =>
     setReasons(selectedReasons.includes(r) ? selectedReasons.filter((x) => x !== r) : [...selectedReasons, r]);
 
-  const save = () => {
-    if (!canSave || !person || !option) return;
-    const ticket = createPayment({
-      personId: person.id,
-      amount,
-      reasons: selectedReasons,
-      note,
-      settleTicketId: option.kind === 'settle' ? option.ticket?.id : undefined,
-      asAnnual: option.kind === 'newAnnual',
+  const save = () =>
+    run(async () => {
+      if (!canSave || !person || !option || busy) return;
+      const ticket = await createPayment({
+        personId: person.id,
+        amount,
+        reasons: selectedReasons,
+        note,
+        settleTicketId: option.kind === 'settle' ? option.ticket?.id : undefined,
+        asAnnual: option.kind === 'newAnnual',
+      });
+      haptic.success();
+      router.replace({ pathname: '/ticket/[id]', params: { id: ticket.id, created: '1' } });
     });
-    haptic.success();
-    router.replace({ pathname: '/ticket/[id]', params: { id: ticket.id, created: '1' } });
-  };
 
   /* ---------- Step 1: choose who is paying ---------- */
   if (!person) {
@@ -142,12 +145,15 @@ export default function NewPaymentScreen() {
                 initial={{ firstName: first, lastName: rest.join(' ') }}
                 submitLabel="Regjistro dhe vazhdo"
                 onCancel={() => setRegistering(false)}
-                onSubmit={(input) => {
-                  const p = addPerson(input);
-                  setRegistering(false);
-                  setQuery('');
-                  selectPerson(p.id);
-                }}
+                busy={busy}
+                onSubmit={(input) =>
+                  run(async () => {
+                    const p = await addPerson(input);
+                    setRegistering(false);
+                    setQuery('');
+                    selectPerson(p.id);
+                  })
+                }
               />
             </Card>
           </ScrollView>
@@ -296,6 +302,7 @@ export default function NewPaymentScreen() {
           label={amountValid ? `Ruaj pagesën · ${formatMoney(amount)}` : 'Ruaj pagesën'}
           icon="check"
           size="lg"
+          loading={busy}
           disabled={!canSave}
           onPress={save}
         />

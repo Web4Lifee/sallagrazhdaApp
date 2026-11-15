@@ -13,11 +13,13 @@ type Props = {
   /** Ignore this person when checking duplicates (editing). */
   editingId?: string;
   submitLabel: string;
-  onSubmit: (input: PersonInput) => void;
+  onSubmit: (input: PersonInput) => void | Promise<void>;
   onCancel?: () => void;
+  /** Shows a spinner on the submit button while the server saves. */
+  busy?: boolean;
 };
 
-export function PersonForm({ initial, editingId, submitLabel, onSubmit, onCancel }: Props) {
+export function PersonForm({ initial, editingId, submitLabel, onSubmit, onCancel, busy }: Props) {
   const people = useStore((s) => s.people);
   const [firstName, setFirstName] = useState(initial?.firstName ?? '');
   const [fatherName, setFatherName] = useState(initial?.fatherName ?? '');
@@ -43,8 +45,8 @@ export function PersonForm({ initial, editingId, submitLabel, onSubmit, onCancel
 
   const submit = () => {
     setSubmitted(true);
-    if (!valid) return;
-    onSubmit({ firstName, fatherName, lastName });
+    if (!valid || busy) return;
+    void onSubmit({ firstName, fatherName, lastName });
   };
 
   return (
@@ -97,7 +99,7 @@ export function PersonForm({ initial, editingId, submitLabel, onSubmit, onCancel
       ) : null}
 
       <View style={{ gap: space.sm }}>
-        <Button label={submitLabel} icon="check" size="lg" onPress={submit} />
+        <Button label={submitLabel} icon="check" size="lg" loading={busy} onPress={submit} />
         {onCancel ? <Button label="Anulo" variant="ghost" onPress={onCancel} /> : null}
       </View>
     </View>

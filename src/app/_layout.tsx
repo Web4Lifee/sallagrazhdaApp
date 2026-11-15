@@ -7,30 +7,36 @@ import { useEffect } from 'react';
 import { AppState, Platform } from 'react-native';
 
 import { colors } from '@/constants/theme';
+import { useSession } from '@/store/session';
 import { useHydrated, useStore } from '@/store/useStore';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 export default function RootLayout() {
   const hydrated = useHydrated();
+  const status = useSession((s) => s.status);
   // Preload the Material Symbols font on Android/web so icons don't pop in.
   const [fontsLoaded, fontError] = useFonts(
     Platform.OS === 'ios' ? {} : { [regularSymbols.name]: regularSymbols.font },
   );
-  const ready = hydrated && (fontsLoaded || !!fontError);
+  const ready = hydrated && status !== 'loading' && (fontsLoaded || !!fontError);
+  const signedIn = status === 'signedIn';
 
-  // Start the next season automatically once its month arrives: checked on launch and whenever
-  // the app comes back to the foreground. (It can also be started manually from Settings.)
   useEffect(() => {
-    if (!hydrated) return;
-    const store = useStore.getState();
-    store.startDueSeasons();
-    store.ensureAnnualTickets();
+    useSession.getState().init();
+  }, []);
+
+  // Refresh from the server on launch and whenever the app comes back to the foreground.
+  // The server starts seasons and creates yearly tickets itself. Offline, the cached data is shown.
+  useEffect(() => {
+    if (!hydrated || !signedIn) return;
+    const refresh = () => useStore.getState().sync().catch(() => {});
+    refresh();
     const sub = AppState.addEventListener('change', (next) => {
-      if (next === 'active') useStore.getState().startDueSeasons();
+      if (next === 'active') refresh();
     });
     return () => sub.remove();
-  }, [hydrated]);
+  }, [hydrated, signedIn]);
 
   useEffect(() => {
     if (ready) SplashScreen.hideAsync().catch(() => {});
@@ -42,9 +48,16 @@ export default function RootLayout() {
     <>
       <StatusBar style="dark" />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="payment/new" options={{ animation: 'slide_from_bottom' }} />
-        <Stack.Screen name="person/new" options={{ animation: 'slide_from_bottom' }} />
+        <Stack.Protected guard={signedIn}>
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="payment/new" options={{ animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="person/new" options={{ animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="person/[id]" />
+          <Stack.Screen name="ticket/[id]" />
+        </Stack.Protected>
+        <Stack.Protected guard={!signedIn}>
+          <Stack.Screen name="login" />
+        </Stack.Protected>
       </Stack>
     </>
   );

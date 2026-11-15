@@ -9,6 +9,7 @@ import { AppText, Card } from '@/components/ui';
 import { colors, radius, space } from '@/constants/theme';
 import { goBack } from '@/lib/nav';
 import { haptic } from '@/lib/platform';
+import { useBusy } from '@/lib/useBusy';
 import { useStore } from '@/store/useStore';
 
 /** Create a new person, or edit one when `id` is given. Optional `first`/`last` prefill from a search. */
@@ -19,6 +20,7 @@ export default function PersonFormScreen() {
   const addPerson = useStore((s) => s.addPerson);
   const updatePerson = useStore((s) => s.updatePerson);
   const editing = !!existing;
+  const [busy, run] = useBusy();
 
   return (
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -41,16 +43,20 @@ export default function PersonFormScreen() {
             initial={existing ?? { firstName: first ?? '', lastName: last ?? '' }}
             editingId={existing?.id}
             submitLabel={editing ? 'Ruaj ndryshimet' : 'Regjistro personin'}
-            onSubmit={(input) => {
-              haptic.success();
-              if (existing) {
-                updatePerson(existing.id, input);
-                goBack();
-              } else {
-                const person = addPerson(input);
-                router.replace(`/person/${person.id}`);
-              }
-            }}
+            busy={busy}
+            onSubmit={(input) =>
+              run(async () => {
+                if (existing) {
+                  await updatePerson(existing.id, input);
+                  haptic.success();
+                  goBack();
+                } else {
+                  const person = await addPerson(input);
+                  haptic.success();
+                  router.replace(`/person/${person.id}`);
+                }
+              })
+            }
           />
         </Card>
       </ScrollView>

@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 
 import { formatMoney } from '@/lib/format';
 import { confirm, haptic, notify } from '@/lib/platform';
+import { reportError } from '@/lib/useBusy';
 import {
   activeSeasonYear,
   currentSeason,
@@ -65,8 +66,12 @@ export function useStartSeason(): () => Promise<void> {
       confirmText: 'Fillo sezonin',
     });
     if (!ok) return;
-    const { created } = startSeason();
-    haptic.success();
-    notify(`Sezoni ${label} filloi`, `U krijuan ${created} fletëpagesa të papaguara.`);
+    try {
+      const { created } = await startSeason();
+      haptic.success();
+      notify(`Sezoni ${label} filloi`, `U krijuan ${created} fletëpagesa të papaguara.`);
+    } catch (e) {
+      reportError(e);
+    }
   };
 }

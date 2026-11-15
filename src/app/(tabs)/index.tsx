@@ -1,7 +1,7 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon, type IconName } from '@/components/Icon';
@@ -13,6 +13,7 @@ import { haptic } from '@/lib/platform';
 import { seasonStartLabel } from '@/lib/season';
 import { useSeasonInfo } from '@/store/seasons';
 import { computeSeasonStats, knownSeasons, recentPayments } from '@/store/selectors';
+import { useRefresh } from '@/store/useRefresh';
 import { useStore } from '@/store/useStore';
 
 export default function HomeScreen() {
@@ -31,12 +32,16 @@ export default function HomeScreen() {
   const stats = useMemo(() => computeSeasonStats(people, tickets, settings, season), [people, tickets, settings, season]);
   const recent = useMemo(() => recentPayments(people, tickets, 3), [people, tickets]);
   const goalReached = stats.goal > 0 && stats.collected >= stats.goal;
+  const { refreshing, onRefresh } = useRefresh();
 
   return (
     <ScrollView
       style={{ backgroundColor: colors.bg }}
       contentContainerStyle={[styles.content, { paddingTop: insets.top + space.md, paddingBottom: TAB_BAR_SPACE + insets.bottom }]}
-      showsVerticalScrollIndicator={false}>
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} colors={[colors.primary]} />
+      }>
       {/* Greeting */}
       <View style={styles.topRow}>
         <View style={{ flex: 1 }}>

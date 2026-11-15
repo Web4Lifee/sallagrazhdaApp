@@ -3,9 +3,11 @@ import { useSyncExternalStore } from 'react';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
-import { capitalize } from '@/lib/format';
-import { activeSeasonYear, nextSeasonDate, nextSeasonYear, seasonOf, seasonStart } from '@/lib/season';
+import { api, type NewPaymentInput, type Snapshot } from '@/lib/api';
+import { seasonOf, seasonStart } from '@/lib/season';
 import type { Person, PersonInput, SeasonRecord, Settings, Ticket } from '@/lib/types';
+
+export type { NewPaymentInput } from '@/lib/api';
 
 export const DEFAULT_SETTINGS: Settings = {
   adminName: 'Administratori',
@@ -18,17 +20,6 @@ export const DEFAULT_SETTINGS: Settings = {
   paperWidth: 58,
 };
 
-export type NewPaymentInput = {
-  personId: string;
-  amount: number;
-  reasons: string[];
-  note?: string;
-  /** Pay this existing unpaid yearly ticket instead of creating a new one. */
-  settleTicketId?: string;
-  /** Record the payment as this person's yearly fee for the active season. */
-  asAnnual?: boolean;
-};
-
 type Data = {
   people: Person[];
   tickets: Ticket[];
@@ -38,215 +29,215 @@ type Data = {
   nextTicketNumber: number;
   /** "personId:season" keys of yearly tickets the user deleted, so they are not generated again. */
   dismissedAnnual: string[];
+  /**
+   * "server": a cached copy of the server's data (the normal case).
+   * "local": data created by the old offline-only version of the app, not uploaded yet.
+   */
+  source: 'local' | 'server';
+  /** When the cache was last refreshed from the server. */
+  syncedAt: string | null;
 };
 
 type Actions = {
-  addPerson: (input: PersonInput) => Person;
-  updatePerson: (id: string, input: PersonInput) => void;
-  deletePerson: (id: string) => void;
-  createPayment: (input: NewPaymentInput) => Ticket;
-  markPaid: (ticketId: string, amount?: number) => void;
-  markUnpaid: (ticketId: string) => void;
-  deleteTicket: (ticketId: string) => void;
-  updateSettings: (patch: Partial<Settings>) => void;
-  addReason: (reason: string) => boolean;
-  removeReason: (reason: string) => void;
-  /** Starts the next season right now (the Settings button). Returns the season year and how many tickets were created. */
-  startSeason: () => { season: number; created: number };
-  /** Starts every season whose start date (1st of the chosen month) has arrived. Returns how many seasons were started. */
-  startDueSeasons: (now?: Date) => number;
-  /** Makes sure every person has a yearly ticket for each started season they belong to. Returns how many were created. */
-  ensureAnnualTickets: () => number;
+  /** Downloads everything from the server and replaces the cache. Skips if it ran moments ago unless `force`. */
+  sync: (options?: { force?: boolean }) => Promise<void>;
+  applySnapshot: (snapshot: Snapshot) => void;
+  /** The cached data in the shape the server's import expects. */
+  localSnapshot: () => Snapshot;
+  /** Forgets all cached data (on sign-out). */
+  clear: () => void;
+
+  addPerson: (input: PersonInput) => Promise<Person>;
+  updatePerson: (id: string, input: PersonInput) => Promise<void>;
+  deletePerson: (id: string) => Promise<void>;
+  createPayment: (input: NewPaymentInput) => Promise<Ticket>;
+  markPaid: (ticketId: string, amount?: number) => Promise<void>;
+  markUnpaid: (ticketId: string) => Promise<void>;
+  deleteTicket: (ticketId: string) => Promise<void>;
+  /** Shows the change at once and rolls it back if the server refuses it. */
+  updateSettings: (patch: Partial<Settings>) => Promise<void>;
+  /** False when the reason is empty or already exists. */
+  addReason: (reason: string) => Promise<boolean>;
+  removeReason: (reason: string) => Promise<void>;
+  /** Starts the next season now (the Settings button). Returns the season year and how many tickets were created. */
+  startSeason: () => Promise<{ season: number; created: number }>;
 };
 
 export type AppState = Data & Actions;
 
-const uid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-const annualKey = (personId: string, season: number) => `${personId}:${season}`;
+const EMPTY: Data = {
+  people: [],
+  tickets: [],
+  settings: DEFAULT_SETTINGS,
+  seasons: [],
+  nextTicketNumber: 1,
+  dismissedAnnual: [],
+  source: 'server',
+  syncedAt: null,
+};
 
-const cleanPerson = (input: PersonInput): PersonInput => ({
-  firstName: capitalize(input.firstName),
-  fatherName: capitalize(input.fatherName),
-  lastName: capitalize(input.lastName),
-});
+/** Amounts go to the server in whole cents. */
+const cents = (n: number) => Math.round(n * 100) / 100;
+
+const upsert = (tickets: Ticket[], ticket: Ticket) =>
+  tickets.some((t) => t.id === ticket.id) ? tickets.map((t) => (t.id === ticket.id ? ticket : t)) : [...tickets, ticket];
+
+const SYNC_THROTTLE_MS = 15_000;
+let syncing: Promise<void> | null = null;
 
 export const useStore = create<AppState>()(
   persist(
     (set, get) => ({
-      people: [],
-      tickets: [],
-      settings: DEFAULT_SETTINGS,
-      seasons: [],
-      nextTicketNumber: 1,
-      dismissedAnnual: [],
+      ...EMPTY,
 
-      addPerson: (input) => {
-        const person: Person = { id: uid(), ...cleanPerson(input), createdAt: new Date().toISOString() };
-        set((s) => ({ people: [...s.people, person] }));
-        get().ensureAnnualTickets();
+      sync: async ({ force = false } = {}) => {
+        const last = get().syncedAt;
+        if (!force && last && Date.now() - Date.parse(last) < SYNC_THROTTLE_MS) return;
+        syncing ??= api
+          .sync()
+          .then((snapshot) => get().applySnapshot(snapshot))
+          .finally(() => {
+            syncing = null;
+          });
+        return syncing;
+      },
+
+      applySnapshot: (snapshot) =>
+        set({
+          people: snapshot.people,
+          tickets: snapshot.tickets,
+          settings: { ...DEFAULT_SETTINGS, ...snapshot.settings },
+          seasons: snapshot.seasons,
+          nextTicketNumber: snapshot.nextTicketNumber,
+          dismissedAnnual: snapshot.dismissedAnnual,
+          source: 'server',
+          syncedAt: new Date().toISOString(),
+        }),
+
+      localSnapshot: () => {
+        const s = get();
+        const clip = (v: string, max: number) => v.trim().slice(0, max);
+        return {
+          people: s.people.map((p) => ({
+            ...p,
+            firstName: clip(p.firstName, 80),
+            fatherName: clip(p.fatherName, 80),
+            lastName: clip(p.lastName, 80),
+          })),
+          tickets: s.tickets.map((t) => ({
+            ...t,
+            amount: cents(t.amount),
+            ...(t.due !== undefined && { due: cents(t.due) }),
+            reasons: t.reasons.map((r) => clip(r, 100)).filter(Boolean).slice(0, 50),
+            ...(t.note !== undefined && { note: clip(t.note, 500) }),
+          })),
+          settings: {
+            ...s.settings,
+            goal: cents(s.settings.goal),
+            annualFee: cents(s.settings.annualFee),
+            reasons: s.settings.reasons.map((r) => clip(r, 100)).filter(Boolean).slice(0, 50),
+          },
+          seasons: s.seasons,
+          nextTicketNumber: s.nextTicketNumber,
+          dismissedAnnual: s.dismissedAnnual,
+        };
+      },
+
+      clear: () => set(EMPTY),
+
+      addPerson: async (input) => {
+        const { person, createdTickets } = await api.createPerson(input);
+        set((s) => ({
+          people: [...s.people, person],
+          tickets: createdTickets.reduce(upsert, s.tickets),
+          nextTicketNumber: Math.max(s.nextTicketNumber, ...createdTickets.map((t) => t.number + 1)),
+        }));
         return person;
       },
 
-      updatePerson: (id, input) =>
-        set((s) => ({
-          people: s.people.map((p) => (p.id === id ? { ...p, ...cleanPerson(input) } : p)),
-        })),
+      updatePerson: async (id, input) => {
+        const person = await api.updatePerson(id, input);
+        set((s) => ({ people: s.people.map((p) => (p.id === id ? person : p)) }));
+      },
 
-      deletePerson: (id) =>
+      deletePerson: async (id) => {
+        await api.deletePerson(id);
         set((s) => ({
           people: s.people.filter((p) => p.id !== id),
           tickets: s.tickets.filter((t) => t.personId !== id),
           dismissedAnnual: s.dismissedAnnual.filter((k) => !k.startsWith(`${id}:`)),
-        })),
+        }));
+      },
 
-      createPayment: ({ personId, amount, reasons, note, settleTicketId, asAnnual }) => {
-        const { tickets, settings, seasons, nextTicketNumber } = get();
-        const now = new Date().toISOString();
-        const trimmedNote = note?.trim() || undefined;
-
-        if (settleTicketId) {
-          const existing = tickets.find((t) => t.id === settleTicketId);
-          if (existing) {
-            const updated: Ticket = {
-              ...existing,
-              amount,
-              reasons,
-              note: trimmedNote,
-              status: 'paid',
-              paidAt: now,
-            };
-            set((s) => ({ tickets: s.tickets.map((t) => (t.id === existing.id ? updated : t)) }));
-            return updated;
-          }
-        }
-
-        const ticket: Ticket = {
-          id: uid(),
-          number: nextTicketNumber,
-          personId,
-          kind: asAnnual ? 'annual' : 'payment',
-          season: activeSeasonYear(seasons, settings),
-          amount,
-          due: asAnnual ? settings.annualFee : undefined,
-          reasons,
-          status: 'paid',
-          note: trimmedNote,
-          createdAt: now,
-          paidAt: now,
-        };
-        set((s) => ({ tickets: [...s.tickets, ticket], nextTicketNumber: s.nextTicketNumber + 1 }));
+      createPayment: async (input) => {
+        const ticket = await api.createPayment({
+          ...input,
+          amount: cents(input.amount),
+          note: input.note?.trim() || undefined,
+        });
+        set((s) => ({
+          tickets: upsert(s.tickets, ticket),
+          nextTicketNumber: Math.max(s.nextTicketNumber, ticket.number + 1),
+        }));
         return ticket;
       },
 
-      markPaid: (ticketId, amount) =>
+      markPaid: async (ticketId, amount) => {
+        const ticket = await api.markPaid(ticketId, amount === undefined ? undefined : cents(amount));
+        set((s) => ({ tickets: upsert(s.tickets, ticket) }));
+      },
+
+      markUnpaid: async (ticketId) => {
+        const ticket = await api.markUnpaid(ticketId);
+        set((s) => ({ tickets: upsert(s.tickets, ticket) }));
+      },
+
+      deleteTicket: async (ticketId) => {
+        const ticket = get().tickets.find((t) => t.id === ticketId);
+        await api.deleteTicket(ticketId);
         set((s) => ({
-          tickets: s.tickets.map((t) =>
-            t.id === ticketId
-              ? { ...t, status: 'paid', paidAt: new Date().toISOString(), amount: amount ?? t.amount }
-              : t,
-          ),
-        })),
+          tickets: s.tickets.filter((t) => t.id !== ticketId),
+          dismissedAnnual:
+            ticket?.kind === 'annual' ? [...s.dismissedAnnual, `${ticket.personId}:${ticket.season}`] : s.dismissedAnnual,
+        }));
+      },
 
-      markUnpaid: (ticketId) =>
-        set((s) => ({
-          tickets: s.tickets.map((t) =>
-            t.id === ticketId ? { ...t, status: 'unpaid', paidAt: undefined, amount: t.due ?? t.amount } : t,
-          ),
-        })),
+      updateSettings: async (patch) => {
+        const before = get().settings;
+        set({ settings: { ...before, ...patch } });
+        try {
+          const saved = await api.updateSettings({
+            ...patch,
+            ...(patch.goal !== undefined && { goal: cents(patch.goal) }),
+            ...(patch.annualFee !== undefined && { annualFee: cents(patch.annualFee) }),
+          });
+          set({ settings: { ...DEFAULT_SETTINGS, ...saved } });
+        } catch (error) {
+          set({ settings: before });
+          throw error;
+        }
+      },
 
-      deleteTicket: (ticketId) =>
-        set((s) => {
-          const ticket = s.tickets.find((t) => t.id === ticketId);
-          const dismissed =
-            ticket?.kind === 'annual'
-              ? [...s.dismissedAnnual, annualKey(ticket.personId, ticket.season)]
-              : s.dismissedAnnual;
-          return { tickets: s.tickets.filter((t) => t.id !== ticketId), dismissedAnnual: dismissed };
-        }),
-
-      updateSettings: (patch) => set((s) => ({ settings: { ...s.settings, ...patch } })),
-
-      addReason: (reason) => {
+      addReason: async (reason) => {
         const value = reason.trim();
         const { reasons } = get().settings;
         if (!value || reasons.some((r) => r.toLowerCase() === value.toLowerCase())) return false;
-        set((s) => ({ settings: { ...s.settings, reasons: [...s.settings.reasons, value] } }));
+        await get().updateSettings({ reasons: [...reasons, value] });
         return true;
       },
 
-      removeReason: (reason) =>
-        set((s) => ({ settings: { ...s.settings, reasons: s.settings.reasons.filter((r) => r !== reason) } })),
+      removeReason: (reason) => get().updateSettings({ reasons: get().settings.reasons.filter((r) => r !== reason) }),
 
-      startSeason: () => {
-        const { seasons, settings } = get();
-        const year = nextSeasonYear(seasons, settings);
-        const record: SeasonRecord = { year, month: settings.seasonStartMonth, startedAt: new Date().toISOString() };
-        set((s) => ({ seasons: [...s.seasons, record] }));
-        return { season: year, created: get().ensureAnnualTickets() };
-      },
-
-      startDueSeasons: (now = new Date()) => {
-        let started = 0;
-        // Catch up if the app was not opened for a while (at most a few seasons).
-        while (started < 5) {
-          const { seasons, settings } = get();
-          const start = nextSeasonDate(seasons, settings);
-          if (start > now) break;
-          const record: SeasonRecord = {
-            year: nextSeasonYear(seasons, settings),
-            month: settings.seasonStartMonth,
-            startedAt: start.toISOString(),
-          };
-          set((s) => ({ seasons: [...s.seasons, record] }));
-          started++;
-        }
-        if (started) get().ensureAnnualTickets();
-        return started;
-      },
-
-      ensureAnnualTickets: () => {
-        const { people, tickets, settings, seasons, nextTicketNumber, dismissedAnnual } = get();
-        if (!seasons.length) return 0;
-        const sorted = [...seasons].sort((a, b) => a.year - b.year);
-
-        const taken = new Set(dismissedAnnual);
-        for (const t of tickets) if (t.kind === 'annual') taken.add(annualKey(t.personId, t.season));
-
-        const now = new Date().toISOString();
-        const reason = settings.reasons[0] ?? 'Mirëmbajtja e oborrit';
-        const created: Ticket[] = [];
-        let number = nextTicketNumber;
-
-        sorted.forEach((season, i) => {
-          const endsAt = sorted[i + 1]?.startedAt;
-          for (const person of people) {
-            // People registered after this season ended don't owe for it.
-            if (endsAt && person.createdAt >= endsAt) continue;
-            if (taken.has(annualKey(person.id, season.year))) continue;
-            created.push({
-              id: uid(),
-              number: number++,
-              personId: person.id,
-              kind: 'annual',
-              season: season.year,
-              amount: settings.annualFee,
-              due: settings.annualFee,
-              reasons: [reason],
-              status: 'unpaid',
-              createdAt: person.createdAt > season.startedAt ? now : season.startedAt,
-            });
-          }
-        });
-
-        if (created.length) {
-          set((s) => ({ tickets: [...s.tickets, ...created], nextTicketNumber: number }));
-        }
-        return created.length;
+      startSeason: async () => {
+        const { season, createdTickets } = await api.startSeason();
+        // The new yearly tickets are created on the server; fetch them.
+        await get().sync({ force: true });
+        return { season: season.year, created: createdTickets };
       },
     }),
     {
       name: 'babi-app-store',
-      version: 2,
+      version: 3,
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (s): Data => ({
         people: s.people,
@@ -255,10 +246,17 @@ export const useStore = create<AppState>()(
         seasons: s.seasons,
         nextTicketNumber: s.nextTicketNumber,
         dismissedAnnual: s.dismissedAnnual,
+        source: s.source,
+        syncedAt: s.syncedAt,
       }),
       migrate: (persisted, version) => {
         const data = (persisted ?? {}) as Partial<Data>;
         if (version < 2 && !data.seasons) data.seasons = migrateSeasons(data);
+        // Everything saved before version 3 was created offline on this phone.
+        if (version < 3) {
+          data.source = 'local';
+          data.syncedAt = null;
+        }
         return data as Data;
       },
       merge: (persisted, current) => {

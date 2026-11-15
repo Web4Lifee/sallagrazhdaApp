@@ -38,6 +38,10 @@ const ICONS = {
   info: { ios: 'info.circle.fill', android: 'info', web: 'info' },
   undo: { ios: 'arrow.uturn.backward', android: 'undo', web: 'undo' },
   alert: { ios: 'exclamationmark.circle.fill', android: 'error', web: 'error' },
+  lock: { ios: 'lock.fill', android: 'lock', web: 'lock' },
+  logout: { ios: 'rectangle.portrait.and.arrow.right', android: 'logout', web: 'logout' },
+  cloud: { ios: 'cloud.fill', android: 'cloud', web: 'cloud' },
+  sync: { ios: 'arrow.triangle.2.circlepath', android: 'sync', web: 'sync' },
   sparkles: { ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' },
   note: { ios: 'text.alignleft', android: 'notes', web: 'notes' },
 } satisfies Record<string, SymbolName>;
