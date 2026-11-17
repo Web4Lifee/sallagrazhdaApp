@@ -6,21 +6,28 @@ The data is saved on a server: the **sallagrazhdaBackend** project (Node.js + Po
 
 ## Run
 
-1. Start the backend (in the `sallagrazhdaBackend` folder): `docker compose up -d`, and create an account once:
-   `docker compose exec -it api node dist/cli/create-admin.js admin`
-2. Point the app at it and start the app:
+The app uses the hosted server `https://sallagrazhda-api.netlify.app` (set in `.env`, see the backend's `docs/NETLIFY.md`) in development and in release builds:
 
 ```bash
 npm install
-cp .env.example .env.local
 npx expo start
 ```
 
+Sign in with the admin account created on the server. The server address is built into the app and isn't shown or changeable on the login screen; to use another server, change `.env` (or `.env.local`) and restart Expo.
+
+The hosted server only answers browsers from origins listed in its `CORS_ORIGINS`, so `npx expo start --web` needs the local backend, or `CORS_ORIGINS=http://localhost:8081` set on Netlify.
+
+### With a local backend
+
+1. Start the backend (in the `sallagrazhdaBackend` folder): `docker compose up -d`, and create an account once:
+   `docker compose exec -it api node dist/cli/create-admin.js admin`
+2. `cp .env.example .env.local` (or remove the `#` in your `.env.local`), then `npx expo start`.
+
 `npx expo start --web` runs it in the browser (the local backend already allows `http://localhost:8081`).
 
-**On a phone with Expo Go:** `localhost` means the phone itself. In development the app automatically uses the computer Expo runs on instead, but the backend must accept connections from the network: add `API_BIND=0.0.0.0` to the backend's `.env` and run `docker compose up -d` there (on Windows PowerShell, or for a single start: `$env:API_BIND = "0.0.0.0"; docker compose up -d`). Phone and computer must be on the same Wi-Fi. You can also type `http://<computer IP>:3000` on the login screen under *Ndrysho*.
+**On a phone with Expo Go:** `localhost` means the phone itself. In development the app automatically uses the computer Expo runs on instead, but the backend must accept connections from the network: add `API_BIND=0.0.0.0` to the backend's `.env` and run `docker compose up -d` there (on Windows PowerShell, or for a single start: `$env:API_BIND = "0.0.0.0"; docker compose up -d`). Phone and computer must be on the same Wi-Fi.
 
-**Release builds** only accept an `https://` server. Set `EXPO_PUBLIC_API_URL=https://api.your-domain` in `.env.production` or as an EAS environment variable before `eas build`.
+**Release builds** only accept an `https://` server. They use `.env`; `.env.local` also applies to builds made on this computer, so leave its value commented out when you build.
 
 ## How it works
 
@@ -45,7 +52,7 @@ Receipts print through the phone's print system (`expo-print`): AirPrint on iOS,
 
 - **The server is the source of truth.** Every change (person, payment, ticket, setting, season) is sent to the server first; receipt numbers are handed out by the server, so they never repeat even with several phones.
 - **Cached copy:** the app keeps the last downloaded data in AsyncStorage, so it opens instantly and can be read offline. It refreshes on launch, when coming back to the foreground, with pull-to-refresh on Ballina/Pagesat, and with **Cilësimet → Llogaria → Rifresko**. Changes need a connection; offline you get a clear message and nothing is lost.
-- **Sign-in:** accounts are created on the server (no sign-up in the app). The login token is stored in the phone's secure storage (`expo-secure-store`: Keychain / Keystore). An expired or revoked session returns to the login screen. **Dil nga llogaria** signs out and removes the cached data from the phone.
+- **Sign-in:** accounts are created on the server (no sign-up in the app). The login token is stored in the phone's secure storage (`expo-secure-store`: Keychain / Keystore). The phone stays signed in until you sign out: the server keeps a session alive while it's used (it ends after a year without use), and only a session revoked on the server (signed out elsewhere, password changed) returns to the login screen. **Dil nga llogaria** signs out and removes the cached data from the phone.
 - **Upgrading from the offline version:** on the first login, data saved by the old version is offered for upload to an empty server (`POST /v1/import`). If the server already has data, the server's data is used. Either way, a backup of the old data stays on the phone (`babi-app-store-backup-*` in AsyncStorage).
 
 ## Code map

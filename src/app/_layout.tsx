@@ -6,6 +6,7 @@ import regularSymbols from 'expo-symbols/androidWeights/regular';
 import { useEffect } from 'react';
 import { AppState, Platform } from 'react-native';
 
+import { LoadingScreen } from '@/components/LoadingScreen';
 import { colors } from '@/constants/theme';
 import { useSession } from '@/store/session';
 import { useHydrated, useStore } from '@/store/useStore';
@@ -39,10 +40,12 @@ export default function RootLayout() {
   }, [hydrated, signedIn]);
 
   useEffect(() => {
-    if (ready) SplashScreen.hideAsync().catch(() => {});
+    if (ready) SplashScreen.hide();
   }, [ready]);
 
-  if (!ready) return null;
+  // The loading screen looks like the native splash; once it is on screen the splash can go,
+  // so a slow start shows the spinner instead of a frozen splash.
+  if (!ready) return <LoadingScreen onLayout={() => SplashScreen.hide()} />;
 
   return (
     <>

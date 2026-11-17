@@ -4,7 +4,8 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
 const TOKEN_KEY = 'session-token';
-const SERVER_KEY = 'server-url';
+/** Older versions saved a server address chosen on the login screen under this key. */
+const LEGACY_SERVER_KEY = 'server-url';
 
 /**
  * The login token lives in the phone's secure storage (Keychain / Android Keystore), never in
@@ -32,37 +33,16 @@ export async function clearToken(): Promise<void> {
   await SecureStore.deleteItemAsync(TOKEN_KEY);
 }
 
-/** Server address baked into the build (EXPO_PUBLIC_API_URL), e.g. https://api.example.com */
-export const DEFAULT_SERVER_URL = process.env.EXPO_PUBLIC_API_URL ?? '';
-
-/** The server address is not secret, so it is kept in AsyncStorage. */
-export async function loadServerUrl(): Promise<string> {
-  return (await AsyncStorage.getItem(SERVER_KEY)) ?? DEFAULT_SERVER_URL;
+/** Returns the server address an older version saved (once), and forgets it. */
+export async function takeLegacyServerUrl(): Promise<string | null> {
+  const saved = await AsyncStorage.getItem(LEGACY_SERVER_KEY);
+  if (saved !== null) await AsyncStorage.removeItem(LEGACY_SERVER_KEY);
+  return saved;
 }
 
-export async function saveServerUrl(url: string): Promise<void> {
-  await AsyncStorage.setItem(SERVER_KEY, url);
+export function isLocalhost(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1';
 }
-
-/**
- * Cleans up a typed server address. Returns null when it is not usable.
- * Release builds only accept https://, so passwords and data are never sent unencrypted.
- */
-export function normalizeServerUrl(input: string): string | null {
-  let value = input.trim().replace(/\/+$/, '');
-  if (!value) return null;
-  if (!/^https?:\/\//i.test(value)) value = `https://${value}`;
-  try {
-    const url = new URL(value);
-    if (url.protocol !== 'https:' && !(__DEV__ && url.protocol === 'http:')) return null;
-    if (isLocalhost(url.hostname) && devMachineHost()) url.hostname = devMachineHost()!;
-    return `${url.protocol}//${url.host}`;
-  } catch {
-    return null;
-  }
-}
-
-export const isLocalhost = (hostname: string) => hostname === 'localhost' || hostname === '127.0.0.1';
 
 /**
  * On a phone, "localhost" is the phone itself. During development (Expo Go / dev build) the app
@@ -75,3 +55,28 @@ export function devMachineHost(): string | null {
   const host = hostUri?.split(':')[0];
   return host && !isLocalhost(host) ? host : null;
 }
+
+/**
+ * Cleans up a server address. Returns null when it is not usable.
+ * Release builds only accept https://, so passwords and data are never sent unencrypted.
+ */
+export function normalizeServerUrl(input: string): string | null {
+  let value = input.trim().replace(/\/+$/, '');
+  if (!value) return null;
+  if (!/^https?:\/\//i.test(value)) value = `https://${value}`;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' && !(__DEV__ && url.protocol === 'http:')) return null;
+    const devHost = isLocalhost(url.hostname) ? devMachineHost() : null;
+    if (devHost) url.hostname = devHost;
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The server the app talks to: EXPO_PUBLIC_API_URL from .env (or .env.local for a local backend),
+ * built into the app. Null when it is missing or, in a release build, not https://.
+ */
+export const SERVER_URL = normalizeServerUrl(process.env.EXPO_PUBLIC_API_URL ?? '');

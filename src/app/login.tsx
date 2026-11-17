@@ -6,51 +6,46 @@ import { Icon } from '@/components/Icon';
 import { AppText, Button, Card, Field } from '@/components/ui';
 import { colors, radius, space } from '@/constants/theme';
 import { ApiError } from '@/lib/api';
-import { DEFAULT_SERVER_URL, normalizeServerUrl } from '@/lib/credentials';
+import { SERVER_URL } from '@/lib/credentials';
 import { reportError } from '@/lib/useBusy';
 import { firstSync, ImportDeclined } from '@/store/first-sync';
 import { useSession } from '@/store/session';
 
+/** Only a build without a usable EXPO_PUBLIC_API_URL (see .env) shows this. */
+const NO_SERVER_MESSAGE = 'Ky version i aplikacionit nuk ka adresë serveri. Kontaktoni administratorin.';
+
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
-  const savedServer = useSession((s) => s.serverUrl);
   const signIn = useSession((s) => s.signIn);
 
-  const [server, setServer] = useState(savedServer || DEFAULT_SERVER_URL);
-  // The server field is only shown when no address is built in, or when the user wants to change it.
-  const [editServer, setEditServer] = useState(!(savedServer || DEFAULT_SERVER_URL));
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(SERVER_URL ? null : NO_SERVER_MESSAGE);
   const [busy, setBusy] = useState(false);
   const passwordRef = useRef<TextInputInstance>(null);
 
-  const serverUrl = normalizeServerUrl(server);
-  const canSubmit = !!serverUrl && !!username.trim() && !!password && !busy;
+  const canSubmit = !!SERVER_URL && !!username.trim() && !!password && !busy;
 
   const submit = async () => {
-    if (!serverUrl) {
-      setEditServer(true);
-      setError(__DEV__ ? 'Shkruani adresën e serverit.' : 'Shkruani adresën e serverit (duhet të fillojë me https://).');
-      return;
-    }
     if (!canSubmit) return;
     setBusy(true);
     setError(null);
     try {
-      await signIn(serverUrl, username.trim(), password, firstSync);
+      await signIn(username.trim(), password, firstSync);
     } catch (e) {
       if (e instanceof ImportDeclined) {
         setError('Hyrja u anulua. Të dhënat e telefonit mbetën të pandryshuara.');
       } else if (e instanceof ApiError && e.status === 401) {
         setError('Emri i përdoruesit ose fjalëkalimi është i gabuar.');
         setPassword('');
+      } else if (e instanceof ApiError && e.code === 'NO_SERVER') {
+        setError(NO_SERVER_MESSAGE);
       } else if (e instanceof ApiError && e.code === 'NOT_OUR_SERVER') {
-        setEditServer(true);
+        // A plain http:// address only happens in development, with a local backend (.env.local).
         setError(
-          __DEV__ && Platform.OS !== 'web'
-            ? `Serveri nuk u gjet në ${serverUrl.replace(/^https?:\/\//, '')}. Telefoni dhe kompjuteri duhet të jenë në të njëjtin Wi-Fi, dhe serveri i hapur për rrjetin: API_BIND=0.0.0.0 në skedarin .env të serverit, pastaj docker compose up -d`
-            : 'Serveri nuk u gjet në këtë adresë. Kontrolloni adresën dhe internetin.',
+          __DEV__ && Platform.OS !== 'web' && SERVER_URL?.startsWith('http://')
+            ? `Serveri lokal nuk u gjet në ${SERVER_URL.replace(/^https?:\/\//, '')}. Telefoni dhe kompjuteri duhet të jenë në të njëjtin Wi-Fi, dhe serveri i hapur për rrjetin: API_BIND=0.0.0.0 në skedarin .env të serverit, pastaj docker compose up -d`
+            : 'Nuk u lidh me serverin. Kontrolloni internetin dhe provoni përsëri.',
         );
       } else {
         reportError(e);
@@ -78,18 +73,6 @@ export default function LoginScreen() {
         </View>
 
         <Card style={{ gap: space.lg }}>
-          {editServer ? (
-            <Field
-              label="Adresa e serverit"
-              value={server}
-              onChangeText={setServer}
-              placeholder="https://api.shembull.com"
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="url"
-              textContentType="URL"
-            />
-          ) : null}
           <Field
             label="Përdoruesi"
             value={username}
@@ -129,16 +112,6 @@ export default function LoginScreen() {
           <Button label="Hyr" icon="lock" size="lg" loading={busy} disabled={!canSubmit} onPress={submit} />
         </Card>
 
-        {!editServer ? (
-          <View style={styles.serverRow}>
-            <Icon name="cloud" size={16} color={colors.textMuted} />
-            <AppText variant="caption" numberOfLines={1} style={{ flexShrink: 1 }}>
-              {serverUrl?.replace(/^https?:\/\//, '')}
-            </AppText>
-            <Button label="Ndrysho" variant="ghost" onPress={() => setEditServer(true)} />
-          </View>
-        ) : null}
-
         <AppText variant="caption" style={{ textAlign: 'center' }}>
           Llogaritë krijohen nga administratori i serverit.
         </AppText>
@@ -168,5 +141,4 @@ const styles = StyleSheet.create({
     padding: space.md,
     borderRadius: radius.md,
   },
-  serverRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: space.xs },
 });
